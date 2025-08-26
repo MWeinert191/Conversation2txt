@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Live Transkriptions-Dashboard</title>
+  <style>
+    /* Einfaches CSS */
+    body { font-family: sans-serif; background: #f0f0f0; padding: 20px; }
+    .user-info, .live { background: white; padding: 20px; margin-bottom: 20px; border-radius: 10px; }
+    .dialog-log { background: white; padding: 15px; height: 300px; overflow-y: auto; border-radius: 10px; }
+    .dialog-entry { margin-bottom: 10px; display: flex; align-items: center; }
+    .dialog-entry img { width: 40px; height: 40px; border-radius: 50%; margin-right: 10px; }
+  </style>
+</head>
+<body>
+
+  <section class="user-info">
+    <h2>👤 Benutzeranmeldung</h2>
+    <input type="text" id="username" placeholder="Dein Name" />
+    <input type="color" id="usercolor" value="#4a90e2" />
+    <input type="file" id="userpic" accept="image/*" />
+    <button id="loginBtn">Anmelden</button>
+    <div id="profilePreview"></div>
+  </section>
+
+  <section class="live">
+    <h2>🎤 Live-Transkription</h2>
+    <button id="startRec">Start</button>
+    <button id="stopRec" disabled>Stop</button>
+  </section>
+
+  <section class="dialog-log" id="dialogLog"></section>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let user = {}, recognition, isRecording = false;
+
+    document.getElementById("loginBtn").onclick = () => {
+      const name = document.getElementById("username").value.trim();
+      const color = document.getElementById("usercolor").value;
+      const file = document.getElementById("userpic").files[0];
+      if (!name || !file) {
+        alert("Name und Profilbild sind Pflicht!");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        user = { name, color, pic: reader.result };
+        document.getElementById("profilePreview").innerHTML =
+          `<img src="${user.pic}" width="50" /> Willkommen, <b>${name}</b>!`;
+      };
+      reader.readAsDataURL(file);
+    };
+
+    document.getElementById("startRec").onclick = () => {
+      if (!('webkitSpeechRecognition' in window)) {
+        alert("Web Speech API nicht unterstützt.");
+        return;
+      }
+      recognition = new webkitSpeechRecognition();
+      recognition.lang = 'de-DE';
+      recognition.continuous = true;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[event.results.length-1][0].transcript;
+        socket.emit("speech", { ...user, text: transcript });
+      };
+
+      recognition.start();
+      isRecording = true;
+      document.getElementById("startRec").disabled = true;
+      document.getElementById("stopRec").disabled = false;
+    };
+
+    document.getElementById("stopRec").onclick = () => {
+      if (recognition && isRecording) recognition.stop();
+      isRecording = false;
+      document.getElementById("startRec").disabled = false;
+      document.getElementById("stopRec").disabled = true;
+    };
+
+    socket.on("speech", (data) => {
+      const entry = document.createElement("div");
+      entry.className = "dialog-entry";
+      entry.innerHTML = `
+        <img src="${data.pic}" alt="Profil" />
+        <div>
+          <strong style="color:${data.color}">${data.name}</strong>: ${data.text}
+        </div>`;
+      document.getElementById("dialogLog").appendChild(entry);
+      document.getElementById("dialogLog").scrollTop = document.getElementById("dialogLog").scrollHeight;
+    });
+  </script>
+</body>
+</html>
+{
+  "name": "sprach-dashboard",
+  "version": "1.0.0",
+  "description": "Live Transkription mit Web Speech API und Socket.io",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  }
+}
+
+const express = require("express");
+const app = express();
+const http = require("http").createServer(app);
+const io = require("socket.io")(http);
+
+app.use(express.static("public"));
+
+io.on("connection", (socket) => {
+  console.log("🟢 Client verbunden");
+  socket.on("speech", (data) => {
+    console.log("📨 Sprachnachricht:", data);
+    socket.broadcast.emit("speech", data);
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => console.log(`🌍 Server läuft auf http://localhost:${PORT}`));
+
+
+
